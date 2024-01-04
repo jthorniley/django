@@ -190,16 +190,28 @@ class ASGIHandler(base.BaseHandler):
 
         async def process_request(request, send):
             response = await self.run_get_response(request)
-            await self.send_response(response, send)
+
+            try:
+                await self.send_response(response, send)
+            except asyncio.CancelledError:
+                # Client disconnected during send_response (ignore)
+                pass
+
+            return response
+
+        # Process request in async task
+        get_response_task = asyncio.create_task(process_request(request, send))
 
         # Try to catch a disconnect while getting response.
+        disconnect_task = asyncio.create_task(self.listen_for_disconnect(receive))
+
         tasks = [
             # Check the status of these tasks and (optionally) terminate them
             # in this order. The listen_for_disconnect() task goes first
             # because it should not raise unexpected errors that would prevent
             # us from cancelling process_request().
-            asyncio.create_task(self.listen_for_disconnect(receive)),
-            asyncio.create_task(process_request(request, send)),
+            disconnect_task,
+            get_response_task,
         ]
         await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         # Now wait on both tasks (they may have both finished by now).
@@ -222,6 +234,12 @@ class ASGIHandler(base.BaseHandler):
                     # Task re-raised the CancelledError as expected.
                     pass
         body_file.close()
+
+        try:
+            response = get_response_task.result()
+            await sync_to_async(response.close)()
+        except asyncio.CancelledError:
+            await signals.request_finished.asend(sender=self.__class__)
 
     async def listen_for_disconnect(self, receive):
         """Listen for disconnect from the client."""
@@ -346,7 +364,6 @@ class ASGIHandler(base.BaseHandler):
                         "more_body": not last,
                     }
                 )
-        await sync_to_async(response.close, thread_sensitive=True)()
 
     @classmethod
     def chunk_bytes(cls, data):

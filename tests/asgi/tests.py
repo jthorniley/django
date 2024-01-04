@@ -19,6 +19,7 @@ from django.test import (
     override_settings,
 )
 from django.urls import path
+from django.utils.asyncio import async_unsafe
 from django.utils.http import http_date
 
 from .urls import sync_waiter, test_filename
@@ -317,6 +318,7 @@ class ASGITest(SimpleTestCase):
 
             threads = []
 
+            @async_unsafe
             def __call__(self, **kwargs):
                 self.threads.append(threading.current_thread())
 
@@ -378,6 +380,14 @@ class ASGITest(SimpleTestCase):
     async def test_asyncio_cancel_error(self):
         # Flag to check if the view was cancelled.
         view_did_cancel = False
+        finished_threads = []
+
+        @async_unsafe
+        def on_finished(sender, **kwargs):
+            nonlocal finished_threads
+            finished_threads.append(threading.current_thread())
+
+        request_finished.connect(on_finished)
 
         # A view that will listen for the cancelled error.
         async def view(request):
@@ -412,6 +422,10 @@ class ASGITest(SimpleTestCase):
         # Give response.close() time to finish.
         await communicator.wait()
         self.assertIs(view_did_cancel, False)
+        # Exactly one call to on_finished handler
+        self.assertEqual(len(finished_threads), 1)
+        # It was NOT on the async thread
+        self.assertNotEqual(finished_threads.pop(), threading.current_thread())
 
         # Request cycle with a disconnect before the view can respond.
         application = TestASGIHandler()
@@ -427,11 +441,25 @@ class ASGITest(SimpleTestCase):
             await communicator.receive_output()
         await communicator.wait()
         self.assertIs(view_did_cancel, True)
+        # Exactly one call to on_finished handler
+        self.assertEqual(len(finished_threads), 1)
+        # It was NOT on the async thread
+        self.assertNotEqual(finished_threads.pop(), threading.current_thread())
+
+        request_finished.disconnect(on_finished)
 
     async def test_asyncio_streaming_cancel_error(self):
         # Similar to test_asyncio_cancel_error(), but during a streaming
         # response.
         view_did_cancel = False
+        finished_threads = []
+
+        @async_unsafe
+        def on_finished(sender, **kwargs):
+            nonlocal finished_threads
+            finished_threads.append(threading.current_thread())
+
+        request_finished.connect(on_finished)
 
         async def streaming_response():
             nonlocal view_did_cancel
@@ -466,6 +494,10 @@ class ASGITest(SimpleTestCase):
         self.assertEqual(response_body["body"], b"Hello World!")
         await communicator.wait()
         self.assertIs(view_did_cancel, False)
+        # Exactly one call to on_finished handler
+        self.assertEqual(len(finished_threads), 1)
+        # It was NOT on the async thread
+        self.assertNotEqual(finished_threads.pop(), threading.current_thread())
 
         # Request cycle with a disconnect.
         application = TestASGIHandler()
@@ -484,6 +516,12 @@ class ASGITest(SimpleTestCase):
             await communicator.receive_output()
         await communicator.wait()
         self.assertIs(view_did_cancel, True)
+        # Exactly one call to on_finished handler
+        self.assertEqual(len(finished_threads), 1)
+        # It was NOT on the async thread
+        self.assertNotEqual(finished_threads.pop(), threading.current_thread())
+
+        request_finished.disconnect(on_finished)
 
     async def test_streaming(self):
         scope = self.async_request_factory._base_scope(

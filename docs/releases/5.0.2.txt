@@ -12,3 +12,7 @@ Bugfixes
 * Reallowed, following a regression in Django 5.0.1, filtering against local
   foreign keys not included in :attr:`.ModelAdmin.list_filter`
   (:ticket:`35087`).
+
+* Fixed a regression in Django 5.0 that caused the ``request_finished`` signal to
+  sometimes not be fired when running Django through an ASGI server, resulting
+  in potential resource leaks (:ticket:`35059`).
