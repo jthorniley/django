@@ -318,7 +318,6 @@ class ASGITest(SimpleTestCase):
 
             threads = []
 
-            @async_unsafe
             def __call__(self, **kwargs):
                 self.threads.append(threading.current_thread())
 
