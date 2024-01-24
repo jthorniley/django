@@ -233,13 +233,14 @@ class ASGIHandler(base.BaseHandler):
                 except asyncio.CancelledError:
                     # Task re-raised the CancelledError as expected.
                     pass
-        body_file.close()
 
         try:
             response = get_response_task.result()
             await sync_to_async(response.close)()
         except asyncio.CancelledError:
             await signals.request_finished.asend(sender=self.__class__)
+
+        body_file.close()
 
     async def listen_for_disconnect(self, receive):
         """Listen for disconnect from the client."""
